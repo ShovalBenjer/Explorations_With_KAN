@@ -2,7 +2,7 @@ import json
 import logging
 import math
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
@@ -32,7 +32,12 @@ class DynamicsConfig:
 class ResonanceSimulation:
     def __init__(self, config: Optional[DynamicsConfig] = None):
         self.config = config or DynamicsConfig()
-        os.makedirs(self.config.output_dir, exist_ok=True)
+        self._output_dir_created = False
+
+    def _ensure_output_dir(self):
+        if not self._output_dir_created:
+            os.makedirs(self.config.output_dir, exist_ok=True)
+            self._output_dir_created = True
 
     def simulate_activation_dynamics(
         self,
@@ -49,13 +54,13 @@ class ResonanceSimulation:
         with torch.no_grad():
             y = activation_fn(x_tensor).numpy()
 
-        dx = np.gradient(x)
+        dx = (x_range[1] - x_range[0]) / max(n_points - 1, 1)
         dy = np.gradient(y, dx)
 
         d2y = np.gradient(dy, dx)
 
-        kinetic = 0.5 * np.sum(dy ** 2) * dx.mean()
-        potential = 0.5 * np.sum(y ** 2) * dx.mean()
+        kinetic = 0.5 * np.sum(dy ** 2) * dx
+        potential = 0.5 * np.sum(y ** 2) * dx
         total = kinetic + potential
 
         return {
@@ -224,6 +229,7 @@ class ResonanceSimulation:
         return results
 
     def save_simulation_results(self, results: dict, filename: str = "simulation_results.json") -> str:
+        self._ensure_output_dir()
         filepath = os.path.join(self.config.output_dir, filename)
         with open(filepath, "w") as f:
             json.dump(results, f, indent=2)

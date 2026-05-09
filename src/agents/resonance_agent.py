@@ -1,5 +1,5 @@
 import logging
-import time
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -18,8 +18,6 @@ from src.activations.rmt_activation import (
 from src.agents.llm_interface import LLMInterface
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_MODEL = "z-ai/glm-5.1"
 
 
 @dataclass
@@ -58,7 +56,7 @@ class ResonanceModel(nn.Module):
         for i in range(self.config.n_hidden_layers):
             out_dim = self.config.hidden_dim
             layers.append(nn.Linear(in_dim, out_dim))
-            layers.append(RMTActivation(self.config.activation_config))
+            layers.append(self.activation)
             in_dim = out_dim
 
         layers.append(nn.Linear(in_dim, self.config.output_dim))
@@ -163,7 +161,7 @@ class ResonanceAgent:
             history.append(record)
             self._training_history.append(record)
 
-            if avg_train_loss < self._best_loss:
+            if avg_train_loss < self._best_loss - self.training_config.early_stop_min_delta:
                 self._best_loss = avg_train_loss
                 self._best_state_dict = {k: v.clone() for k, v in self.model.state_dict().items()}
                 patience_counter = 0
@@ -203,6 +201,14 @@ class ResonanceAgent:
 
         return total_loss / max(n_batches, 1)
 
+    _PARAM_BOUNDS = {
+        "rho_scale": (0.01, 10.0),
+        "tau_frequency": (0.01, 20.0),
+        "tau_phase": (-math.pi, math.pi),
+        "phi_base_freq": (0.01, 10.0),
+        "spectral_radius": (0.01, 10.0),
+    }
+
     def _llm_optimize(self, epoch: int, train_loss: float, test_loss: Optional[float]) -> Optional[dict]:
         try:
             spectral_info = self.model.activation.get_spectral_info()
@@ -226,21 +232,11 @@ class ResonanceAgent:
                 ),
             )
 
-            if "rho_scale" in suggestions and isinstance(suggestions["rho_scale"], (int, float)):
-                with torch.no_grad():
-                    self.model.activation.rho_scale.fill_(suggestions["rho_scale"])
-            if "tau_frequency" in suggestions and isinstance(suggestions["tau_frequency"], (int, float)):
-                with torch.no_grad():
-                    self.model.activation.tau_frequency.fill_(suggestions["tau_frequency"])
-            if "tau_phase" in suggestions and isinstance(suggestions["tau_phase"], (int, float)):
-                with torch.no_grad():
-                    self.model.activation.tau_phase.fill_(suggestions["tau_phase"])
-            if "phi_base_freq" in suggestions and isinstance(suggestions["phi_base_freq"], (int, float)):
-                with torch.no_grad():
-                    self.model.activation.phi_base_freq.fill_(suggestions["phi_base_freq"])
-            if "spectral_radius" in suggestions and isinstance(suggestions["spectral_radius"], (int, float)):
-                with torch.no_grad():
-                    self.model.activation.spectral_radius.fill_(suggestions["spectral_radius"])
+            with torch.no_grad():
+                for param_name, bounds in self._PARAM_BOUNDS.items():
+                    if param_name in suggestions and isinstance(suggestions[param_name], (int, float)):
+                        val = max(bounds[0], min(bounds[1], float(suggestions[param_name])))
+                        getattr(self.model.activation, param_name).fill_(val)
 
             logger.info(f"LLM optimization applied at epoch {epoch}: {suggestions.get('reasoning', 'N/A')}")
             return suggestions
@@ -261,6 +257,13 @@ class ResonanceAgent:
         return output.numpy()
 
     def compare_activations(self, X: np.ndarray, y: np.ndarray) -> dict:
+        """Compare raw activation outputs across modes against regression targets.
+
+        Note: This computes MSE between the raw activation function output and the
+        regression targets y. This is NOT a measure of model prediction quality —
+        it simply shows how closely each activation shape resembles the target signal.
+        For model prediction accuracy, use predict() and compare against y directly.
+        """
         modes = ["rho_sinh", "tau_oscillator", "phi_harmonics", "resonance"]
         results = {}
 

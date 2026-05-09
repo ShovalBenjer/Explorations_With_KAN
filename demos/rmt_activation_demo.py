@@ -134,8 +134,8 @@ def demo_resonance_simulation():
         energy = data.get("energy", {})
         print(f"  Energy: kinetic={energy.get('kinetic', 0):.4f}, potential={energy.get('potential', 0):.4f}, total={energy.get('total', 0):.4f}")
         print(f"  Temporal: converged={data.get('converged')}, final_state={data.get('final_state', 'N/A')}")
-        print(f"  Spectral: peak_freq={data.get('peak_frequency', 'N/A'):.4f}, centroid={data.get('spectral_centroid', 'N/A'):.4f}")
-        print(f"  Coupled oscillators: order_param={data.get('order_parameter', 'N/A'):.4f}")
+        print(f"  Spectral: peak_freq={data.get('peak_frequency', 0):.4f}, centroid={data.get('spectral_centroid', 0):.4f}")
+        print(f"  Coupled oscillators: order_param={data.get('order_parameter', 0):.4f}")
 
     filepath = simulation.save_simulation_results(results)
     print(f"\nFull results saved to: {filepath}")
